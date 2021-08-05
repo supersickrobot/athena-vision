@@ -1,7 +1,8 @@
 import logging
 import cv2
 import numpy as np
-from rs_tools.pipe import setup_pipe, aligned, background, centroid, crop_horiz, crop_vert
+import pyrealsense2 as rs
+from rs_tools.pipe import setup_pipe, aligned, background, centroid, crop_horiz, crop_vert, std_filter
 log = logging.getLogger(__name__)
 
 class Vision:
@@ -12,6 +13,7 @@ class Vision:
     async def connect(self):
         log.debug(f'Connecting to camera at {self.device_id}')
         self.pipeline, self.profile = setup_pipe(self.config, self.device_id)
+
 
     async def establish_base(self):
         est_timer = self.config['initialization']['timer']
@@ -55,8 +57,12 @@ class Vision:
         try:
             while True:
                 frames = self.pipeline.wait_for_frames()
+                align = rs.align(rs.stream.color)
+                frameset = align.process(frames)
+                aligned_depth = frameset.get_depth_frame()
 
-                images, depth, color, edges = aligned(self.config, frames)
+                depth = std_filter(aligned_depth)
+                depth = np.asanyarray(depth.get_data())
                 depthy = cv2.applyColorMap(cv2.convertScaleAbs(depth, alpha=0.03), cv2.COLORMAP_JET)
                 oi_config = self.config['object_identification']
 
@@ -84,10 +90,10 @@ class Vision:
                                            [box[2][0], box[2][1]+l_bound],
                                            [box[3][0], box[3][1]+l_bound]])
 
-                        display = cv2.drawContours(images, [box_adj], 0, (255, 255, 0), 2)
-                # cv2.imshow('align', display)
-                # if cv2.waitKey(1) & 0xFF == ord('q'):
-                #     break
+                        display = cv2.drawContours(junky, [box_adj], 0, (255, 255, 0), 2)
+                cv2.imshow('align', display)
+                if cv2.waitKey(1) & 0xFF == ord('q'):
+                    break
 
         finally:
             self.pipeline.stop()

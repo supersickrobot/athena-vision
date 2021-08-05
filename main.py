@@ -7,6 +7,7 @@ from server import Server
 from config import configuration
 from vision import Vision
 
+
 log = logging.getLogger(__name__)
 this_dir = os.path.dirname(os.path.realpath(__file__))
 
@@ -22,19 +23,19 @@ async def main():
     log.info('initializing camera')
     vision = Vision(config['camera'])
     await vision.connect()
-    center, width = await vision.establish_base()
-    message = f'table found at center: {round(center)} w/ width {round(width)}'
-    #  ,mp'], config['comm']['tcp_port']))
+    await vision.establish_base()
+
 
     log.info('starting main loop')
     try:
         while True:
             await asyncio.gather(
-                server.run(),
+                # server.run(),
                 vision.find_objs(action_q),
             )
     except asyncio.CancelledError:
         log.info('Stopping main loop')
+
 
 
 

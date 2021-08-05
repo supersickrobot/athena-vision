@@ -2,6 +2,7 @@ import pyrealsense2 as rs
 import numpy as np
 import cv2
 
+
 def setup_pipe(config, device_id):
     pipeline = rs.pipeline()
     _config = rs.config()
@@ -50,7 +51,7 @@ def background(depth, num_bins, mult):
     # depth_data = np.asanyarray(depth.get_data())
     hist, bins = np.histogram(depth_data[depth_data != 0], bins=num_bins)
     high_bin = bins[np.argmax(hist)]
-    bin_width = (np.amax(bins) - np.amin(bins)) / 100
+    bin_width = (np.amax(bins) - np.amin(bins)) / num_bins
     dd = depth_data
 
     low = high_bin-bin_width*(mult-1)
@@ -65,6 +66,7 @@ def background(depth, num_bins, mult):
     # binary = cv2.applyColorMap(cv2.convertScaleAbs(binary, alpha=0.03), cv2.COLORMAP_JET)
     return dd, binary, tbl_far
 
+
 def xyz(depth):
     pc = rs.pointcloud()
     points = pc.calculate(depth)
@@ -76,11 +78,11 @@ def xyz(depth):
 
     return x, y, z
 
-def centroid(binary):
 
+def centroid(binary):
     flat = binary.sum(axis=1)
-    peak_thresh=300
-    min_width = 100
+    peak_thresh=100
+    min_width = 50
     counter = 0
     peaks =[]
     depths=[]
@@ -96,11 +98,13 @@ def centroid(binary):
     ind = depths.index(max(depths))
     return peaks[ind], depths[ind]
 
+
 def crop_horiz(image, center, width):
     l_bound = int(center-width/2)
     u_bound = int(center+width/2)
     out = image[:, l_bound:u_bound]
     return out, l_bound, u_bound
+
 
 def crop_vert(image, center, depth):
     l_bound = int(center-depth/2)
@@ -108,4 +112,14 @@ def crop_vert(image, center, depth):
     out = image[l_bound:u_bound, :]
     return out, l_bound, u_bound
 
+
+def std_filter(frame):
+    dec_filter = rs.decimation_filter()
+    spat_filter = rs.spatial_filter()
+    temp_filter = rs.temporal_filter()
+
+    filtered = dec_filter.process(frame)
+    filtered = spat_filter.process(filtered)
+    filtered = temp_filter.process(filtered)
+    return filtered
 # cv2.polylines

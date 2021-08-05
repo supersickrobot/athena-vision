@@ -42,7 +42,7 @@ def configuration():
                     "high": 100000
                 },
                 "background": {
-                    "bins": 1000,
+                    "bins": 100,
                     "mult": 2
                 }
 
