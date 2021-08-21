@@ -8,6 +8,18 @@ def configuration():
         "comm": {
             "url": "http://192.168.1.8:8000"
         },
+        "safety":{
+            "device_id": "f0265103",
+            "depth": {
+                "resolution": [320, 240],
+                "scale": 0.001,
+                "fps": 30
+            },
+            "color": {
+                "resolution": [640, 480],
+                "fps": 30
+            },
+        },
         "camera": {
             "device_id": "f0221610",
             "alpha": 0.5,
@@ -38,13 +50,14 @@ def configuration():
                     "high": 255
                 },
                 "area": {
-                    "low": 1000,
+                    "low": 900,
                     "high": 100000
                 },
                 "background": {
                     "bins": 100,
                     "mult": 2
-                }
+                },
+            "depth_random_sample_size" : 30
 
             }
         }

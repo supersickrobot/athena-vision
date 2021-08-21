@@ -21,17 +21,18 @@ async def main():
     display_q = asyncio.Queue()
     server = Server(action_q, display_q, config)
     log.info('initializing camera')
-    vision = Vision(config['camera'])
-    await vision.connect()
+    vision = Vision(config['camera'], config['safety'])
     await vision.establish_base()
-
 
     log.info('starting main loop')
     try:
         while True:
             await asyncio.gather(
                 # server.run(),
-                vision.find_objs(action_q),
+                vision.search(action_q, True)
+                # vision.depth_search(action_q, True),
+                # vision.color_search(action_q, True)
+                # vision.robot_safety(action_q, True)
             )
     except asyncio.CancelledError:
         log.info('Stopping main loop')

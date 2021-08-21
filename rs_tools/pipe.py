@@ -46,7 +46,7 @@ def aligned(config, frames):
     return images, push_depth, color, edges
 
 
-def background(depth, num_bins, mult):
+def find_background(depth, num_bins, mult):
     depth_data = depth.copy()
     # depth_data = np.asanyarray(depth.get_data())
     hist, bins = np.histogram(depth_data[depth_data != 0], bins=num_bins)
@@ -59,12 +59,21 @@ def background(depth, num_bins, mult):
     dd[dd > high] = 0
     dd[dd < low] = 0
 
-    tbl_far = high
+    tbl_height = high_bin
 
     binary = dd.copy()
     binary[binary != 0] = 1
     # binary = cv2.applyColorMap(cv2.convertScaleAbs(binary, alpha=0.03), cv2.COLORMAP_JET)
-    return dd, binary, tbl_far
+    return dd, binary, tbl_height
+
+
+def isolate_background(depth, height, tolerance_near, tolerance_far):
+    depth_data = depth.copy()
+    far = height+tolerance_far
+    near = height-tolerance_near
+    depth_data[depth_data < near] = 0
+    depth_data[depth_data > far] = 0
+    return depth_data
 
 
 def xyz(depth):
@@ -112,6 +121,11 @@ def crop_vert(image, center, depth):
     out = image[l_bound:u_bound, :]
     return out, l_bound, u_bound
 
+def crop_below_workspace(image, table_edge):
+    u_bound = image.shape[0]
+    l_bound = int(table_edge)
+    out = image[l_bound: u_bound, :]
+    return out
 
 def std_filter(frame):
     dec_filter = rs.decimation_filter()

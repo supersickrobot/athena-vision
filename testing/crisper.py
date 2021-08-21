@@ -4,7 +4,7 @@ import matplotlib.animation as animation
 import asyncio
 import cv2
 import numpy as np
-from rs_tools.pipe import background, centroid, crop_vert
+from rs_tools.pipe import find_background, centroid, crop_vert
 import time
 
 # this function is for testing camera tools and filtering
@@ -29,6 +29,7 @@ def crispy():
     align = rs.align(align_to)
     depth_scale = profile.get_device().first_depth_sensor().get_depth_scale()
     depth_scale = depth_scale*1000
+    depth_scale = 1
 
     dec_filter = rs.decimation_filter()
     spat_filter = rs.spatial_filter()
@@ -76,7 +77,7 @@ def crispy():
             # point_cloud = pc.calculate(depth_frame)
 
             # todo : testing approach to background setting, currently the background is having abberations near edges, possibly from distortion
-            funk, binary, tbl_far = background(depth, 2000, 6)
+            funk, binary, tbl_far = find_background(depth, 2000, 6)
             crosssection = []
             clicker = clickstore.point
             if clickstore.orient == 'horiz':
@@ -123,7 +124,7 @@ def crispy():
             edges = cv2.Canny(depth_to_jet, low_threshold, low_threshold * ratio, kernal)
             edges = cv2.cvtColor(edges, cv2.COLOR_GRAY2BGR)
             color = np.asanyarray(color_frame.get_data())
-            images = cv2.addWeighted(junky, .5, edges, .5, 0.0)
+            images = cv2.addWeighted(depthy, .5, edges, .5, 0.0)
             # cv2.imshow('no filter', depthy)
             #
             if clickstore.orient == 'horiz':
