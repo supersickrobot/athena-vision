@@ -18,3 +18,4 @@ def crop_rectangle(depth_image, rect):
     warped = cv2.warpPerspective(depth_image, M, (width, height))
 
     return warped
+

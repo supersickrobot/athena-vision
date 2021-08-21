@@ -18,7 +18,7 @@ class Vision:
         self.safety = config_safety
         self.device_id = self.config['device_id']
         self.safety_id = self.safety['device_id']
-
+        self.objects = []
         self.pipeline = rs.pipeline()
         self.pipeline_safety = rs.pipeline()
 
@@ -43,7 +43,16 @@ class Vision:
         self.temp_filter.set_option(rs.option.filter_smooth_delta, 100)
         self.hole_filter = rs.hole_filling_filter()
 
+        self.depth_scale = self.profile.get_device().first_depth_sensor().get_depth_scale()
+        self.depth_scale = self.depth_scale * 1000
+
         self.objects = []
+
+    def isolate_height(self, cropped_image):
+        depth_mean = np.mean(cropped_image)
+        depth_std = np.std(cropped_image)
+        height = -1 * (depth_mean - self.worksapce_height) * self.depth_scale
+        return depth_mean, depth_std, height
 
     async def establish_base(self):
         est_timer = self.config['initialization']['timer']
@@ -195,7 +204,7 @@ class Vision:
         finally:
             self.pipeline.stop()
 
-    async def search(self, action_q, vis_on):
+    async def search(self, vis_on):
         try:
             prev_process_time = 0
             new_process_time = 0
@@ -246,7 +255,7 @@ class Vision:
                 display = color
                 depth_objects = [[] for xx in contours]
                 color_objects =[[] for xx in contours_color]
-
+                obj_bins = 100
                 for cnt_index, cnt in enumerate(contours):
                     area = cv2.contourArea(cnt)
                     if area > oi_config['area']['low'] and area < oi_config['area']['high']:
@@ -262,13 +271,10 @@ class Vision:
                             rad = np.int0(circ[1])
                             crop_circ = depth[x-rad:x+rad, y-rad:y+rad]
                             _crop_circ = crop_circ[crop_circ != 0]
-                            depth_mean = np.mean(_crop_circ)
-                            depth_std = np.std(_crop_circ)
-                            hist, bins = np.histogram(_crop_circ, bins=50)
-                            depth_val = bins[np.argmax(hist)]
+                            depth_mean, depth_std, height = self.isolate_height(_crop_circ)
                             display = cv2.circle(display, [x, y], rad, (255, 255, 0), 2)
-                            cv2.putText(display, f'{np.round(depth_val, 3)}', (x, y), cv2.FONT_HERSHEY_DUPLEX, 0.5, (36, 255, 12), 1)
-                            obj = {'type': 'depth', 'shape': 'circle', 'dimensions': circ, 'depth': depth_val,
+                            cv2.putText(display, f'{np.round(height, 3)}', (x, y), cv2.FONT_HERSHEY_DUPLEX, 0.5, (36, 255, 12), 1)
+                            obj = {'type': 'depth', 'shape': 'circle', 'dimensions': circ, 'height': height,
                                    'depth_mean': depth_mean, 'depth_std': depth_std}
 
                         else:
@@ -282,11 +288,13 @@ class Vision:
                             _crop_rect = crop_rect[crop_rect != 0]
                             depth_mean = np.mean(_crop_rect)
                             depth_std = np.std(_crop_rect)
-                            hist, bins = np.histogram(_crop_rect, bins=50)
+                            hist, bins = np.histogram(_crop_rect, bins=obj_bins)
                             depth_val = bins[np.argmax(hist)]
+                            height = -1*(depth_val - self.worksapce_height)*self.depth_scale
+                            depth_mean, depth_std, height = self.isolate_height(_crop_rect)
                             display = cv2.drawContours(display, [box_adj], 0, (255, 255, 0), 2)
-                            cv2.putText(display, f'{np.round(depth_val, 3)}', (box_adj[0][0], box_adj[0][1]), cv2.FONT_HERSHEY_DUPLEX, 0.5, (36, 255, 12), 1)
-                            obj = {'type': 'depth', 'shape': 'rect', 'dimensions': box, 'depth': depth_val,
+                            cv2.putText(display, f'{np.round(height, 3)}', (box_adj[0][0], box_adj[0][1]), cv2.FONT_HERSHEY_DUPLEX, 0.5, (36, 255, 12), 1)
+                            obj = {'type': 'depth', 'shape': 'rect', 'dimensions': box, 'height': height,
                                    'depth_mean': depth_mean, 'depth_std': depth_std}
                         depth_objects[cnt_index] = obj
 
@@ -304,14 +312,11 @@ class Vision:
                             rad = np.int0(circ[1])
                             crop_circ = depth[x - rad:x + rad, y - rad:y + rad]
                             _crop_circ = crop_circ[crop_circ != 0]
-                            depth_mean = np.mean(_crop_circ)
-                            depth_std = np.std(_crop_circ)
-                            hist, bins = np.histogram(_crop_circ, bins=50)
-                            depth_val = bins[np.argmax(hist)]
+                            depth_mean, depth_mean, height = self.isolate_height(_crop_circ)
                             display = cv2.circle(display, [x, y], rad, (255, 0, 255), 2)
-                            cv2.putText(display, f'{np.round(depth_val, 3)}', (x, y), cv2.FONT_HERSHEY_DUPLEX, 0.5,
+                            cv2.putText(display, f'{np.round(height, 3)}', (x, y), cv2.FONT_HERSHEY_DUPLEX, 0.5,
                                         (36, 255, 12), 1)
-                            obj = {'type': 'color', 'shape': 'circle', 'dimensions': circ, 'depth': depth_val,
+                            obj = {'type': 'color', 'shape': 'circle', 'dimensions': circ, 'height': height,
                                    'depth_mean': depth_mean, 'depth_std': depth_std}
 
                         else:
@@ -319,21 +324,18 @@ class Vision:
                             box = np.int0(box)
                             crop_rect = crop_rectangle(depth, rect)
                             _crop_rect = crop_rect[crop_rect != 0]
-                            depth_mean = np.mean(_crop_rect)
-                            depth_std = np.std(_crop_rect)
-                            hist, bins = np.histogram(_crop_rect, bins=50)
-                            depth_val = bins[np.argmax(hist)]
+                            depth_mean, depth_std, height = self.isolate_height(_crop_rect)
                             display = cv2.drawContours(display, [box], 0, (255, 0, 255), 2)
-                            cv2.putText(display, f'{np.round(depth_val, 3)}', (box[0][0], box [0][1]),
+                            cv2.putText(display, f'{np.round(height, 3)}', (box[0][0], box [0][1]),
                                         cv2.FONT_HERSHEY_DUPLEX, 0.5, (36, 255, 12), 1)
-                            obj = {'type': 'depth', 'shape': 'rect', 'dimensions': box, 'depth': depth_val,
+                            obj = {'type': 'depth', 'shape': 'rect', 'dimensions': box, 'height': height,
                                    'depth_mean': depth_mean, 'depth_std': depth_std}
                         color_objects[cnt_index] = obj
 
-                depth_objects = depth_objects[depth_objects != []]
-                color_objects = color_objects[color_objects != []]
+                depth_objects = [i for i in depth_objects if i]
+                color_objects = [i for i in color_objects if i]
                 all_objects = depth_objects + color_objects
-
+                self.objects = all_objects
                 if vis_on:
                     cv2.imshow('depth_feed', display)
                     if cv2.waitKey(1) & 0xFF == ord('q'):
