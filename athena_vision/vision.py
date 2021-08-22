@@ -1,21 +1,27 @@
-import logging
 import cv2
+import time
+import logging
 import numpy as np
 import pyrealsense2 as rs
-import time
-from matplotlib import pyplot
-from joblib import Parallel, delayed
-import sklearn as sk
-from scipy import signal
+
 from rs_tools.image_manipulation import crop_rectangle
-from rs_tools.pipe import setup_pipe, aligned, find_background, centroid, crop_horiz,\
-    crop_vert, std_filter, isolate_background, crop_below_workspace
+from rs_tools.pipe import find_background, centroid, crop_vert, isolate_background, crop_below_workspace
+
 log = logging.getLogger(__name__)
 
+
 class Vision:
-    def __init__(self, config_camera, config_safety):
+    """Realsense LIDAR driver and image processor
+
+    This is designed to run in its own process because it is very computationally expensive. It saves its grabbed
+        and analyzed frames in a local buffer that's made available to a VisionClient running in another process.
+    """
+
+    def __init__(self, config_camera, config_safety, live_display):
         self.config = config_camera
         self.safety = config_safety
+        self.live_display = live_display
+
         self.device_id = self.config['device_id']
         self.safety_id = self.safety['device_id']
         self.objects = []
@@ -23,17 +29,20 @@ class Vision:
         self.pipeline_safety = rs.pipeline()
 
         _config = rs.config()
-        _config.enable_device(self.device_id)
+        # _config.enable_device(self.device_id)
+        rs.config.enable_device_from_file(_config, r'C:\Users\xpspectre\workspace\athena-vision\data\feed1.bag')
         _config.enable_stream(rs.stream.depth, self.config['depth']['resolution'][0],
                               self.config['depth']['resolution'][1], rs.format.z16, 30)
-        _config.enable_stream(rs.stream.color, self.config['color']['resolution'][0],
-                              self.config['color']['resolution'][1], rs.format.bgr8, 30)
+        # _config.enable_stream(rs.stream.color, self.config['color']['resolution'][0],
+        #                       self.config['color']['resolution'][1], rs.format.bgr8, 30)
+        # _config.enable_stream(rs.stream.depth, 1024, 768, rs.format.z16, 30)
+        _config.enable_stream(rs.stream.color, 1920, 1080, rs.format.bgr8, 30)
         self.profile = self.pipeline.start(_config)
         depth_sensor = self.profile.get_device().first_depth_sensor()
-        depth_sensor.set_option(rs.option.visual_preset, 5)  # 5 is short range
-        depth_sensor.set_option(rs.option.confidence_threshold, 1)  # 3 i the highest
-        depth_sensor.set_option(rs.option.noise_filtering, 6)
-        depth_sensor.set_option(rs.option.inter_cam_sync_mode, 1)
+        # depth_sensor.set_option(rs.option.visual_preset, 5)  # 5 is short range
+        # depth_sensor.set_option(rs.option.confidence_threshold, 1)  # 3 i the highest
+        # depth_sensor.set_option(rs.option.noise_filtering, 6)
+        # depth_sensor.set_option(rs.option.inter_cam_sync_mode, 1)
         align_to = rs.stream.color
         self.align = rs.align(align_to)
         depth_scale = self.profile.get_device().first_depth_sensor().get_depth_scale()
@@ -56,7 +65,7 @@ class Vision:
 
     async def establish_base(self):
         est_timer = self.config['initialization']['timer']
-        thresh_timer = est_timer/2
+        thresh_timer = est_timer / 2
         stor = {"center": [],
                 "width": [],
                 "height": []}
@@ -112,13 +121,14 @@ class Vision:
                 # funk, binary, tbl_far = find_background(depth, 2000, 6)
                 funk = isolate_background(depth, self.worksapce_height, 0, 200)
                 funky = cv2.applyColorMap(cv2.convertScaleAbs(funk, alpha=0.03), cv2.COLORMAP_JET)
-                junky = depthy-funky
+                junky = depthy - funky
                 crop, l_bound, u_bound = crop_vert(junky, self.workspace_center, self.worksapce_width)
 
                 # contour detection
                 im = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
 
-                retval, threshold = cv2.threshold(im, oi_config['contour']['low'], oi_config['contour']['high'], cv2.THRESH_BINARY_INV)
+                retval, threshold = cv2.threshold(im, oi_config['contour']['low'], oi_config['contour']['high'],
+                                                  cv2.THRESH_BINARY_INV)
                 im = cv2.cvtColor(threshold, cv2.COLOR_GRAY2RGB)
                 contours, hierarchy = cv2.findContours(threshold, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
 
@@ -128,10 +138,10 @@ class Vision:
                         rect = cv2.minAreaRect(cnt)
                         box = cv2.boxPoints(rect)
                         box = np.int0(box)
-                        box_adj = np.array([[box[0][0], box[0][1]+l_bound],
-                                           [box[1][0], box[1][1]+l_bound],
-                                           [box[2][0], box[2][1]+l_bound],
-                                           [box[3][0], box[3][1]+l_bound]])
+                        box_adj = np.array([[box[0][0], box[0][1] + l_bound],
+                                            [box[1][0], box[1][1] + l_bound],
+                                            [box[2][0], box[2][1] + l_bound],
+                                            [box[3][0], box[3][1] + l_bound]])
 
                         display = cv2.drawContours(color, [box_adj], 0, (255, 255, 0), 2)
                 if vis_on:
@@ -155,7 +165,7 @@ class Vision:
                 low_threshold = 20
                 ratio = 5
                 kernal = 21
-                edges = cv2.Canny(color_to_bw, low_threshold, low_threshold*ratio, kernal)
+                edges = cv2.Canny(color_to_bw, low_threshold, low_threshold * ratio, kernal)
                 edges = cv2.cvtColor(edges, cv2.COLOR_GRAY2RGB)
                 # edges = cv2.bilateralFilter(edges, 9, 75, 75)
                 edges = cv2.blur(edges, (3, 3))
@@ -195,7 +205,7 @@ class Vision:
                 # get depth frame, search off table
                 depth_frame = aligned_frames.get_depth_frame()
                 depth = np.asanyarray(depth_frame.get_data())
-                edge_loc = self.workspace_center + self.worksapce_width/2
+                edge_loc = self.workspace_center + self.worksapce_width / 2
                 crop = crop_below_workspace(depth, edge_loc)
                 if vis_on:
                     cv2.imshow('safety_feed', crop)
@@ -204,7 +214,8 @@ class Vision:
         finally:
             self.pipeline.stop()
 
-    async def search(self, vis_on):
+    async def run(self):
+        """Main loop that continuously collects frames, analyzes them, and makes them available to the system."""
         try:
             prev_process_time = 0
             new_process_time = 0
@@ -214,7 +225,7 @@ class Vision:
                 aligned_frames = self.align.process(frames)
 
                 # get frames
-                depth_frame = aligned_frames .get_depth_frame()
+                depth_frame = aligned_frames.get_depth_frame()
                 color_frame = aligned_frames.get_color_frame()
                 new_process_time = time.time()
 
@@ -249,12 +260,13 @@ class Vision:
                 edges = cv2.cvtColor(edges, cv2.COLOR_GRAY2RGB)
                 edges = cv2.blur(edges, (3, 3))
                 retval_color, threshold_color = cv2.threshold(edges, 5, 255,
-                                                  cv2.THRESH_BINARY)
+                                                              cv2.THRESH_BINARY)
                 threshold_color = cv2.cvtColor(threshold_color, cv2.COLOR_BGR2GRAY)
-                contours_color, hierarchy_color = cv2.findContours(threshold_color, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+                contours_color, hierarchy_color = cv2.findContours(threshold_color, cv2.RETR_TREE,
+                                                                   cv2.CHAIN_APPROX_SIMPLE)
                 display = color
                 depth_objects = [[] for xx in contours]
-                color_objects =[[] for xx in contours_color]
+                color_objects = [[] for xx in contours_color]
                 obj_bins = 100
                 for cnt_index, cnt in enumerate(contours):
                     area = cv2.contourArea(cnt)
@@ -262,18 +274,19 @@ class Vision:
                         rect = cv2.minAreaRect(cnt)
                         circ = cv2.minEnclosingCircle(cnt)
 
-                        area_rect = rect[1][0]*rect[1][1]
-                        area_circ = np.pi*np.square(circ[1])
+                        area_rect = rect[1][0] * rect[1][1]
+                        area_circ = np.pi * np.square(circ[1])
 
                         if area_rect > area_circ:
                             x = np.int0(circ[0][0])
                             y = np.int0(circ[0][1])
                             rad = np.int0(circ[1])
-                            crop_circ = depth[x-rad:x+rad, y-rad:y+rad]
+                            crop_circ = depth[x - rad:x + rad, y - rad:y + rad]
                             _crop_circ = crop_circ[crop_circ != 0]
                             depth_mean, depth_std, height = self.isolate_height(_crop_circ)
                             display = cv2.circle(display, [x, y], rad, (255, 255, 0), 2)
-                            cv2.putText(display, f'{np.round(height, 3)}', (x, y), cv2.FONT_HERSHEY_DUPLEX, 0.5, (36, 255, 12), 1)
+                            cv2.putText(display, f'{np.round(height, 3)}', (x, y), cv2.FONT_HERSHEY_DUPLEX, 0.5,
+                                        (36, 255, 12), 1)
                             obj = {'type': 'depth', 'shape': 'circle', 'dimensions': circ, 'height': height,
                                    'depth_mean': depth_mean, 'depth_std': depth_std}
 
@@ -290,10 +303,11 @@ class Vision:
                             depth_std = np.std(_crop_rect)
                             hist, bins = np.histogram(_crop_rect, bins=obj_bins)
                             depth_val = bins[np.argmax(hist)]
-                            height = -1*(depth_val - self.worksapce_height)*self.depth_scale
+                            height = -1 * (depth_val - self.worksapce_height) * self.depth_scale
                             depth_mean, depth_std, height = self.isolate_height(_crop_rect)
                             display = cv2.drawContours(display, [box_adj], 0, (255, 255, 0), 2)
-                            cv2.putText(display, f'{np.round(height, 3)}', (box_adj[0][0], box_adj[0][1]), cv2.FONT_HERSHEY_DUPLEX, 0.5, (36, 255, 12), 1)
+                            cv2.putText(display, f'{np.round(height, 3)}', (box_adj[0][0], box_adj[0][1]),
+                                        cv2.FONT_HERSHEY_DUPLEX, 0.5, (36, 255, 12), 1)
                             obj = {'type': 'depth', 'shape': 'rect', 'dimensions': box, 'height': height,
                                    'depth_mean': depth_mean, 'depth_std': depth_std}
                         depth_objects[cnt_index] = obj
@@ -303,8 +317,8 @@ class Vision:
                     if area > oi_config['area']['low'] and area < oi_config['area']['high']:
                         rect = cv2.minAreaRect(cnt)
                         circ = cv2.minEnclosingCircle(cnt)
-                        area_rect = rect[1][0]*rect[1][1]
-                        area_circ = np.pi*np.square(circ[1])
+                        area_rect = rect[1][0] * rect[1][1]
+                        area_circ = np.pi * np.square(circ[1])
 
                         if area_rect > area_circ:
                             x = np.int0(circ[0][0])
@@ -326,7 +340,7 @@ class Vision:
                             _crop_rect = crop_rect[crop_rect != 0]
                             depth_mean, depth_std, height = self.isolate_height(_crop_rect)
                             display = cv2.drawContours(display, [box], 0, (255, 0, 255), 2)
-                            cv2.putText(display, f'{np.round(height, 3)}', (box[0][0], box [0][1]),
+                            cv2.putText(display, f'{np.round(height, 3)}', (box[0][0], box[0][1]),
                                         cv2.FONT_HERSHEY_DUPLEX, 0.5, (36, 255, 12), 1)
                             obj = {'type': 'depth', 'shape': 'rect', 'dimensions': box, 'height': height,
                                    'depth_mean': depth_mean, 'depth_std': depth_std}
@@ -336,18 +350,24 @@ class Vision:
                 color_objects = [i for i in color_objects if i]
                 all_objects = depth_objects + color_objects
                 self.objects = all_objects
-                if vis_on:
+                if self.live_display:
                     cv2.imshow('depth_feed', display)
                     if cv2.waitKey(1) & 0xFF == ord('q'):
                         break
-                fps = 1/(new_process_time-prev_process_time)
+                fps = 1 / (new_process_time - prev_process_time)
                 prev_process_time = new_process_time
                 fps = int(fps)
-                print(fps)
-                #search depth
-                #search color
-                #clean/combine features
-                #identification
+                # print(fps)  # TODO: this was active
+                # search depth
+                # search color
+                # clean/combine features
+                # identification
         finally:
             self.pipeline.stop()
 
+
+class VisionClient:
+    """Client to the main Vision object that runs in the main program's event loop"""
+
+    def __init__(self):
+        raise NotImplementedError

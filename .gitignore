@@ -1,3 +1,5 @@
+# Dev/testing data files
+/data/
 
 # Created by https://www.toptal.com/developers/gitignore/api/windows,linux,macos,python,pycharm+all,virtualenv
 # Edit at https://www.toptal.com/developers/gitignore?templates=windows,linux,macos,python,pycharm+all,virtualenv
