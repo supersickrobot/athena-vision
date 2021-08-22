@@ -41,16 +41,3 @@ async def read_respond(self, event):
 
     return
 
-
-def getSiteRoutes():
-    try:
-        waReq = primarySiteRoute['siteUrl'] + 'getSiteConfigs'
-        response = requests.get(waReq, verify=False)
-        log.info(f'/GetArbs/getSiteConfigs:| {response.text}')
-        routes = json.loads(response.text)
-        # log.debug(f'routes:{routes}')
-    except:
-        log.error(f'/GetArbs/getSiteConfigs: error in request service may not be running')
-        routes = ''
-    return routes
-

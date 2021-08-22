@@ -1,42 +1,86 @@
 import os
 import sys
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import threading
 import logging
-from logging.handlers import QueueHandler
-import webapp.read_and_respond
-from webapp.websocket import WSHandler
-from aiohttp import web
-import asyncio
-import json
+import datetime
+import time
 
+from waitress import serve
+from flask import Flask, abort, current_app, request, url_for, jsonify
+from flask_cors import CORS
+import flask.scaffold
+flask.helpers._endpoint_from_view_func = flask.scaffold._endpoint_from_view_func
+from config import configuration
+from flask_restful import Resource, Api
+from functools import wraps
+import uuid
+import urllib3
+
+config = configuration()
+host = config['web']['host']
+port = config['web']['port']
+urllib3.disable_warnings()
 log = logging.getLogger(__name__)
+accountSeq = 0
 
-# load config here
-async def main():
-    # logging.basicConfig(level=logging.DEBUG, format='%(levelname)s : %(asctime)s : %(name)s : %(message)s')
+tasks = {}
 
-    ws_handler = WSHandler()
-    sub_app = web.Application()
-    sub_app['ws'] = ws_handler
+app = Flask(__name__)
+api = Api(app)
+app.config.from_object(__name__)
 
-    ws_app = web.Application()
-    ws_app.add_routes([web.get('/', ws_handler.handler)])
+CORS(app, resources={r'/*': {'origins': '*'}})
 
-    app = web.Application()
-    app.add_subapp('/api/v1', sub_app)
-    app.add_subapp('/ws', ws_app)
-    await asyncio.gather(
-        # web._run_app(app, host=app_config_json["wsUrl"], port=app_config_json["wsUrlPort"]),  # using appConfig.json in root
-        heartbeat(ws_handler),
-        #this is your entry point for new async loops
-    )
 
-async def heartbeat(wshandler):
+@app.route('/')
+def emptyrout():
+    return "root route path: "
 
-    while True:
-        log.debug('start heartbeat')
-        await asyncio.sleep(60)
+
+@app.route('/ping')
+def ping():
+    return 'ring-a-ding-ding'
+
+
+@app.before_first_request
+def before_first_request():
+    """Start a background thread that cleans up old tasks and performs other operations in this case every 60 seconds."""
+
+    def clean_old_tasks():
+        """
+        This function cleans up old tasks from our in-memory data structure.
+        """
+        global tasks
+        while True:
+            # Only keep tasks that are running or that finished less than 5
+            # minutes ago.
+            refresh_time_out = datetime.datetime.timestamp(datetime.datetime.now()) - 5 * 60
+            tasks = {task_id: task for task_id, task in tasks.items()
+                     if 'completion_timestamp' not in task or task['completion_timestamp'] > refresh_time_out}
+
+            time.sleep(120)
+            log.info(f"cleared tasks completed more than 5 minutes ago")
+
+    if not current_app.config['TESTING']:
+        thread = threading.Thread(target=clean_old_tasks)
+        thread.start()
+
+
+class GetTaskStatus(Resource):
+    def get(self, task_id):
+        """
+        Return status about an asynchronous task. If this request returns a 202
+        status code, it means that task hasn't finished yet. Else, the response
+        from the task is returned.
+        """
+        task = tasks.get(task_id)
+        if task is None:
+            abort(404)
+        if 'return_value' not in task:
+            return '', 202, {'Location': url_for('gettaskstatus', task_id=task_id)}
+        return task['return_value']
 
 
 if __name__ == '__main__':
-    asyncio.run(main())
+    # app.run(ssl_context='adhoc', host=tIp, port=tPort)
+    serve(app, host=host, port=port, url_scheme='http')

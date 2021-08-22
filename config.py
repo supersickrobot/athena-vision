@@ -2,11 +2,11 @@ def configuration():
     config = {
         "verbosity": 3,
         "web": {
-            "host": "0.0.0.0",
+            "host": "192.168.1.9",
             "port": 5055
         },
         "comm": {
-            "url": "http://192.168.1.8:8000"
+            "url": "http://192.168.1.9:8000"
         },
         "safety":{
             "device_id": "f0265103",
