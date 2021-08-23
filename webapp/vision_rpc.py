@@ -1,10 +1,12 @@
 """Remote procedure call (RPC)-like mechanism for using camera+image processing in another process"""
 import io
 import cv2
+import json
 import asyncio
 import logging
 import threading
 import traceback
+import numpy as np
 import aioprocessing
 import multiprocessing
 
@@ -65,7 +67,7 @@ class VisionServer:
                     res = io.BytesIO(buf)
                 elif name == 'analyzed_objects':
                     analyzed = vision.read_latest_analyzed()
-                    res = analyzed.objects  # TODO: json-serilizable
+                    res = to_serializable(analyzed.objects)
                 else:
                     log.error(f'Vision req: {req} not recognized. Ignoring.')
                 res_q.put(res)
@@ -100,3 +102,16 @@ class VisionClient:
 
     async def get_analyzed_objects(self):
         return await self._get('analyzed_objects')
+
+
+class NumpyEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, np.ndarray):
+            return obj.tolist()
+        return json.JSONEncoder.default(self, obj)
+
+
+def to_serializable(x):
+    """Hack to turn nested data structure containing numpy arrays into serializable form"""
+    j = json.dumps(x, cls=NumpyEncoder)
+    return json.loads(j)

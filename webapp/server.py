@@ -18,6 +18,7 @@ class WebServer:
             web.get('/color-img', self.handle_get_color_img),
             web.get('/depth-img', self.handle_get_depth_img),
             web.get('/analyzed-img', self.handle_get_analyzed_img),
+            web.get('/analyzed-objects', self.handle_get_analyzed_objects),
         ])
 
         app = web.Application()
@@ -46,3 +47,10 @@ class WebServer:
         """Return the last captured annotated depth + color as an annotated image with identified object data"""
         img = await self.vision_client.get_analyzed_img()
         return web.Response(body=img, content_type='image/jpeg')
+
+    async def handle_get_analyzed_objects(self, request):
+        """"Return the last captured identified objects list"""
+        objects = await self.vision_client.get_analyzed_objects()
+        return web.json_response(objects)
+
+    # TODO: combined image+structured data responses
