@@ -275,7 +275,10 @@ class Vision:
                 color = np.asanyarray(color_frame.get_data())
 
                 # Save raw data
-                raw_data = RawData(now, depth, depthy, color)
+                #   Passing through these data structures triggers:
+                #   "RuntimeError: Error occured during execution of the processing block! See the log for more info"
+                #   There's probably some buffer ownership mess that doesn't like this
+                raw_data = RawData(now, np.copy(depth), np.copy(depthy), np.copy(color))
                 self._write_raw(raw_data)
 
                 # color detection
@@ -376,6 +379,7 @@ class Vision:
                 self.objects = all_objects
 
                 # Save analyzed data
+                #   Passing through these data structures is fine since they're all created in our analysis code
                 analyzed_data = AnalyzedData(now, display, all_objects)
                 self._write_analyzed(analyzed_data)
 
