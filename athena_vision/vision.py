@@ -5,6 +5,7 @@ import threading
 import collections
 import numpy as np
 import pyrealsense2 as rs
+from datetime import datetime, timezone
 
 from rs_tools.image_manipulation import crop_rectangle
 from rs_tools.pipe import find_background, centroid, crop_vert, isolate_background
@@ -15,7 +16,7 @@ from rs_tools.pipe import find_background, centroid, crop_vert, isolate_backgrou
 
 log = logging.getLogger(__name__)
 
-RawData = collections.namedtuple('RawData', ['time', 'depth' 'color'])
+RawData = collections.namedtuple('RawData', ['time', 'depth', 'depth_img', 'color'])
 AnalyzedData = collections.namedtuple('AnalyzedData', ['time', 'annotated_img', 'identified'])
 
 
@@ -28,7 +29,7 @@ class Vision:
     The functionality in here assumes it's running in its own thread/process. It doesn't use asyncio.
     """
 
-    def __init__(self, config, live_display, buffer_capacity=128):
+    def __init__(self, config, live_display, buffer_capacity=32):
         self.config = config
         self.live_display = live_display
         self.buffer_capacity = buffer_capacity
@@ -41,9 +42,9 @@ class Vision:
         self._raw_buffer_lock = threading.Lock()
         self._analyzed_buffer = collections.deque(maxlen=buffer_capacity)
         self._analyzed_buffer_lock = threading.Lock()
+        self.objects = []
 
         # Connect to camera (or saved dataset to emulate camera)
-        self.objects = []
         self.pipeline = rs.pipeline()
 
         cfg = rs.config()
@@ -79,6 +80,22 @@ class Vision:
         self.workspace_center = None
         self.workspace_width = None
         self.workspace_height = None
+
+    def _write_raw(self, raw):
+        with self._raw_buffer_lock:
+            self._raw_buffer.append(raw)
+
+    def read_latest_raw(self):
+        with self._raw_buffer_lock:
+            return self._raw_buffer[-1]
+
+    def _write_analyzed(self, analyzed):
+        with self._analyzed_buffer_lock:
+            self._analyzed_buffer.append(analyzed)
+
+    def read_latest_analyzed(self):
+        with self._analyzed_buffer_lock:
+            return self._analyzed_buffer[-1]
 
     def isolate_height(self, cropped_image):
         depth_mean = np.mean(cropped_image)
@@ -221,14 +238,18 @@ class Vision:
     def run(self):
         """Main loop that continuously collects frames, analyzes them, and makes them available to the system."""
         try:
-            prev_process_time = 0
             while True:
+                # Start timer for calculating frame rate
                 tic = time.perf_counter()
+
+                # Save timestamp for grabbed frame
+                now = datetime.now(timezone.utc)
+
+                # Grab frame
                 oi_config = self.config['object_identification']
                 frames = self.pipeline.wait_for_frames()
                 aligned_frames = self.align.process(frames)
 
-                # get frames
                 depth_frame = aligned_frames.get_depth_frame()
                 color_frame = aligned_frames.get_color_frame()
 
@@ -248,11 +269,16 @@ class Vision:
 
                 retval, threshold = cv2.threshold(im, oi_config['contour']['low'], oi_config['contour']['high'],
                                                   cv2.THRESH_BINARY_INV)
-                im = cv2.cvtColor(threshold, cv2.COLOR_GRAY2RGB)
+                # im = cv2.cvtColor(threshold, cv2.COLOR_GRAY2RGB)
                 contours, hierarchy = cv2.findContours(threshold, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
 
-                # color detection
                 color = np.asanyarray(color_frame.get_data())
+
+                # Save raw data
+                raw_data = RawData(now, depth, depthy, color)
+                self._write_raw(raw_data)
+
+                # color detection
                 low_threshold = 20
                 color_to_bw = cv2.cvtColor(color, cv2.COLOR_RGB2GRAY)
                 color_to_bw = cv2.bilateralFilter(color_to_bw, 11, 25, 25)
@@ -268,8 +294,8 @@ class Vision:
                 contours_color, hierarchy_color = cv2.findContours(threshold_color, cv2.RETR_TREE,
                                                                    cv2.CHAIN_APPROX_SIMPLE)
                 display = color
-                depth_objects = [[] for xx in contours]
-                color_objects = [[] for xx in contours_color]
+                depth_objects = [[] for _ in contours]
+                color_objects = [[] for _ in contours_color]
                 obj_bins = 100
                 for cnt_index, cnt in enumerate(contours):
                     area = cv2.contourArea(cnt)
@@ -348,15 +374,21 @@ class Vision:
                 color_objects = [i for i in color_objects if i]
                 all_objects = depth_objects + color_objects
                 self.objects = all_objects
+
+                # Save analyzed data
+                analyzed_data = AnalyzedData(now, display, all_objects)
+                self._write_analyzed(analyzed_data)
+
+                # Show detected objects (with which sensor detected what and heights) overlaid on color image
                 if self.live_display:
                     cv2.imshow('depth_feed', display)
                     if cv2.waitKey(1) & 0xFF == ord('q'):
                         break
 
                 toc = time.perf_counter()
-
                 fps = 1 / (toc - tic)
                 log.debug(f'FPS: {int(round(fps))}')
+
                 # search depth
                 # search color
                 # clean/combine features

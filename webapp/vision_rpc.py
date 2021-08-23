@@ -33,7 +33,7 @@ class VisionServer:
         """Vision runner in separate process. This is all synchronous threaded code."""
         # Set logging in separate process
         #   TODO: make verbosity configurable
-        logging.basicConfig(level=logging.INFO, format='%(levelname)s : %(asctime)s : %(name)s : %(message)s')
+        logging.basicConfig(level=logging.DEBUG, format='%(levelname)s : %(asctime)s : %(name)s : %(message)s')
 
         # Instantiate and initialize Vision object
         log.info('Running vision process')
