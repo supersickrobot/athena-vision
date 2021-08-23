@@ -5,7 +5,7 @@ import asyncio
 
 from webapp.util import get_verbosity
 from webapp.server import WebServer
-from athena_vision.vision import Vision
+from webapp.vision_rpc import VisionServer, VisionClient
 
 log = logging.getLogger(__name__)
 
@@ -25,19 +25,19 @@ async def main():
     logging.basicConfig(level=get_verbosity(verbosity), format='%(levelname)s : %(asctime)s : %(name)s : %(message)s')
     log.info(f'Read config file {config_file}')
 
-    # Initialize camera
+    # Initialize camera/lidar RPC system
     log.info('Initializing camera')
     live_display = config.get('live_display', False)
-    vision = Vision(config['camera'], config['safety'], live_display)
-    await vision.establish_base()
+    vision_server = VisionServer(config['camera'], live_display)
+    vision_client = VisionClient(vision_server.req_q, vision_server.res_q)
 
-    # Initialize webserver
-    web_server = WebServer(config['web'])
+    # Initialize webserver, feeding in the object that gives access to the vision system outputs
+    web_server = WebServer(config['web'], vision_client)
 
     # Run main program loop
     log.info('Starting main loop')
     await asyncio.gather(
-        # vision.run(),
+        vision_server.run(),
         web_server.run(),
         wait()
     )

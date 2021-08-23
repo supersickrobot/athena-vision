@@ -1,13 +1,22 @@
 import cv2
 import time
 import logging
+import threading
+import collections
 import numpy as np
 import pyrealsense2 as rs
 
 from rs_tools.image_manipulation import crop_rectangle
-from rs_tools.pipe import find_background, centroid, crop_vert, isolate_background, crop_below_workspace
+from rs_tools.pipe import find_background, centroid, crop_vert, isolate_background
+
+# Dev: turn numpy's runtime warnings into errors to debug
+# import warnings
+# warnings.simplefilter('error', RuntimeWarning)
 
 log = logging.getLogger(__name__)
+
+RawData = collections.namedtuple('RawData', ['time', 'depth' 'color'])
+AnalyzedData = collections.namedtuple('AnalyzedData', ['time', 'annotated_img', 'identified'])
 
 
 class Vision:
@@ -15,90 +24,103 @@ class Vision:
 
     This is designed to run in its own process because it is very computationally expensive. It saves its grabbed
         and analyzed frames in a local buffer that's made available to a VisionClient running in another process.
+
+    The functionality in here assumes it's running in its own thread/process. It doesn't use asyncio.
     """
 
-    def __init__(self, config_camera, config_safety, live_display):
-        self.config = config_camera
-        self.safety = config_safety
+    def __init__(self, config, live_display, buffer_capacity=128):
+        self.config = config
         self.live_display = live_display
+        self.buffer_capacity = buffer_capacity
 
-        self.device_id = self.config['device_id']
-        self.safety_id = self.safety['device_id']
+        # TODO: validate config with jsonschema
+
+        # Save collected data in ring buffers to make the latest (few) always available and restrict memory usage
+        #   Control access via methods that are meant to be called from other threads
+        self._raw_buffer = collections.deque(maxlen=buffer_capacity)
+        self._raw_buffer_lock = threading.Lock()
+        self._analyzed_buffer = collections.deque(maxlen=buffer_capacity)
+        self._analyzed_buffer_lock = threading.Lock()
+
+        # Connect to camera (or saved dataset to emulate camera)
         self.objects = []
         self.pipeline = rs.pipeline()
-        self.pipeline_safety = rs.pipeline()
 
-        _config = rs.config()
-        # _config.enable_device(self.device_id)
-        rs.config.enable_device_from_file(_config, r'C:\Users\xpspectre\workspace\athena-vision\data\feed1.bag')
-        _config.enable_stream(rs.stream.depth, self.config['depth']['resolution'][0],
-                              self.config['depth']['resolution'][1], rs.format.z16, 30)
-        # _config.enable_stream(rs.stream.color, self.config['color']['resolution'][0],
-        #                       self.config['color']['resolution'][1], rs.format.bgr8, 30)
-        # _config.enable_stream(rs.stream.depth, 1024, 768, rs.format.z16, 30)
-        _config.enable_stream(rs.stream.color, 1920, 1080, rs.format.bgr8, 30)
-        self.profile = self.pipeline.start(_config)
+        cfg = rs.config()
+        device_id = config.get('device_id')
+        emulated_file = config.get('emulated_file')
+
+        if emulated_file is None:
+            cfg.enable_device(device_id)
+        else:
+            rs.config.enable_device_from_file(cfg, r'C:\Users\xpspectre\workspace\athena-vision\data\feed1.bag')
+
+        cfg.enable_stream(rs.stream.depth, config['depth']['resolution'][0],
+                          config['depth']['resolution'][1], rs.format.z16, 30)
+        cfg.enable_stream(rs.stream.color, config['color']['resolution'][0],
+                          config['color']['resolution'][1], rs.format.bgr8, 30)
+
+        self.profile = self.pipeline.start(cfg)
         depth_sensor = self.profile.get_device().first_depth_sensor()
-        # depth_sensor.set_option(rs.option.visual_preset, 5)  # 5 is short range
-        # depth_sensor.set_option(rs.option.confidence_threshold, 1)  # 3 i the highest
-        # depth_sensor.set_option(rs.option.noise_filtering, 6)
-        # depth_sensor.set_option(rs.option.inter_cam_sync_mode, 1)
-        align_to = rs.stream.color
-        self.align = rs.align(align_to)
-        depth_scale = self.profile.get_device().first_depth_sensor().get_depth_scale()
-        self.depth_scale = depth_scale * 1000
+        if emulated_file is None:
+            # These are only settable on a real camera (they're readonly on an emulated camera)
+            depth_sensor.set_option(rs.option.visual_preset, 5)  # 5 is short range
+            depth_sensor.set_option(rs.option.confidence_threshold, 1)  # 3 i the highest
+            depth_sensor.set_option(rs.option.noise_filtering, 6)
+            depth_sensor.set_option(rs.option.inter_cam_sync_mode, 1)
+
+        self.align = rs.align(rs.stream.color)
+        self.depth_scale = self.profile.get_device().first_depth_sensor().get_depth_scale() * 1000
         self.temp_filter = rs.temporal_filter()
-        self.temp_filter.set_option(rs.option.filter_smooth_alpha, .2)
+        self.temp_filter.set_option(rs.option.filter_smooth_alpha, 0.2)
         self.temp_filter.set_option(rs.option.filter_smooth_delta, 100)
         self.hole_filter = rs.hole_filling_filter()
 
-        self.depth_scale = self.profile.get_device().first_depth_sensor().get_depth_scale()
-        self.depth_scale = self.depth_scale * 1000
-
-        self.objects = []
+        self.workspace_center = None
+        self.workspace_width = None
+        self.workspace_height = None
 
     def isolate_height(self, cropped_image):
         depth_mean = np.mean(cropped_image)
         depth_std = np.std(cropped_image)
-        height = -1 * (depth_mean - self.worksapce_height) * self.depth_scale
+        height = -1 * (depth_mean - self.workspace_height) * self.depth_scale
         return depth_mean, depth_std, height
 
-    async def establish_base(self):
+    def establish_base(self):
         est_timer = self.config['initialization']['timer']
         thresh_timer = est_timer / 2
-        stor = {"center": [],
-                "width": [],
-                "height": []}
-        try:
-            while est_timer > 0:
-                frames = self.pipeline.wait_for_frames()
-                aligned_frames = self.align.process(frames)
-                depth_frame = aligned_frames.get_depth_frame()
-                depth_frame = self.temp_filter.process(depth_frame)
-                depth = np.asanyarray(depth_frame.get_data())
+        store = {
+            'center': [],
+            'width': [],
+            'height': []
+        }
+        for _ in range(est_timer):
+            frames = self.pipeline.wait_for_frames()
+            aligned_frames = self.align.process(frames)
+            depth_frame = aligned_frames.get_depth_frame()
+            depth_frame = self.temp_filter.process(depth_frame)
+            depth = np.asanyarray(depth_frame.get_data())
 
-                # identify tabletop, using histogram, highest bin expected to be target
-                num_bins = self.config['initialization']['bins']
-                mult = self.config['initialization']['mult']
-                funk, binary, tbl_far = find_background(depth, num_bins, mult)
+            # identify tabletop, using histogram, highest bin expected to be target
+            num_bins = self.config['initialization']['bins']
+            mult = self.config['initialization']['mult']
+            funk, binary, tbl_far = find_background(depth, num_bins, mult)
 
-                if len(stor['center']) < thresh_timer:
-                    center, width = centroid(binary)
-                    stor['center'].append(center)
-                    stor['width'].append(width)
-                    stor['height'].append(tbl_far)
-                else:
-                    center = np.mean(stor['center'])
-                    width = np.mean(stor['width'])
-                    height = np.mean(stor['height'])
+            if len(store['center']) < thresh_timer:
+                center, width = centroid(binary)
+                store['center'].append(center)
+                store['width'].append(width)
+                store['height'].append(tbl_far)
+            else:
+                center = np.mean(store['center'])
+                width = np.mean(store['width'])
+                height = np.mean(store['height'])
 
-                est_timer = est_timer - 1
-        finally:
-            self.workspace_center = center
-            self.worksapce_width = width
-            self.worksapce_height = height
+        self.workspace_center = center
+        self.workspace_width = width
+        self.workspace_height = height
 
-    async def depth_search(self, action_q, vis_on):
+    def depth_search(self, vis_on):
         try:
             while True:
                 oi_config = self.config['object_identification']
@@ -119,10 +141,10 @@ class Vision:
 
                 # find and isolate just the table (background)
                 # funk, binary, tbl_far = find_background(depth, 2000, 6)
-                funk = isolate_background(depth, self.worksapce_height, 0, 200)
+                funk = isolate_background(depth, self.workspace_height, 0, 200)
                 funky = cv2.applyColorMap(cv2.convertScaleAbs(funk, alpha=0.03), cv2.COLORMAP_JET)
                 junky = depthy - funky
-                crop, l_bound, u_bound = crop_vert(junky, self.workspace_center, self.worksapce_width)
+                crop, l_bound, u_bound = crop_vert(junky, self.workspace_center, self.workspace_width)
 
                 # contour detection
                 im = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
@@ -152,7 +174,7 @@ class Vision:
         finally:
             self.pipeline.stop()
 
-    async def color_search(self, action_q, vis_on):
+    def color_search(self, vis_on):
         try:
             while True:
                 frames = self.pipeline.wait_for_frames()
@@ -196,30 +218,12 @@ class Vision:
         finally:
             self.pipeline.stop()
 
-    async def robot_safety(self, action_q, vis_on):
-        try:
-            while True:
-                frames = self.pipeline.wait_for_frames()
-                aligned_frames = self.align.process(frames)
-
-                # get depth frame, search off table
-                depth_frame = aligned_frames.get_depth_frame()
-                depth = np.asanyarray(depth_frame.get_data())
-                edge_loc = self.workspace_center + self.worksapce_width / 2
-                crop = crop_below_workspace(depth, edge_loc)
-                if vis_on:
-                    cv2.imshow('safety_feed', crop)
-                    if cv2.waitKey(1) & 0xFF == ord('q'):
-                        break
-        finally:
-            self.pipeline.stop()
-
-    async def run(self):
+    def run(self):
         """Main loop that continuously collects frames, analyzes them, and makes them available to the system."""
         try:
             prev_process_time = 0
-            new_process_time = 0
             while True:
+                tic = time.perf_counter()
                 oi_config = self.config['object_identification']
                 frames = self.pipeline.wait_for_frames()
                 aligned_frames = self.align.process(frames)
@@ -227,7 +231,6 @@ class Vision:
                 # get frames
                 depth_frame = aligned_frames.get_depth_frame()
                 color_frame = aligned_frames.get_color_frame()
-                new_process_time = time.time()
 
                 depth_frame = self.temp_filter.process(depth_frame)
                 depth = np.asanyarray(depth_frame.get_data())
@@ -235,10 +238,10 @@ class Vision:
 
                 # find and isolate just the table (background)
                 # funk, binary, tbl_far = find_background(depth, 2000, 6)
-                funk = isolate_background(depth, self.worksapce_height, 0, 200)
+                funk = isolate_background(depth, self.workspace_height, 0, 200)
                 funky = cv2.applyColorMap(cv2.convertScaleAbs(funk, alpha=0.03), cv2.COLORMAP_JET)
                 junky = depthy - funky
-                crop, l_bound, u_bound = crop_vert(junky, self.workspace_center, self.worksapce_width)
+                crop, l_bound, u_bound = crop_vert(junky, self.workspace_center, self.workspace_width)
 
                 # contour detection
                 im = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
@@ -299,11 +302,6 @@ class Vision:
                                                 [box[3][0], box[3][1] + l_bound]])
                             crop_rect = crop_rectangle(depth, rect)
                             _crop_rect = crop_rect[crop_rect != 0]
-                            depth_mean = np.mean(_crop_rect)
-                            depth_std = np.std(_crop_rect)
-                            hist, bins = np.histogram(_crop_rect, bins=obj_bins)
-                            depth_val = bins[np.argmax(hist)]
-                            height = -1 * (depth_val - self.worksapce_height) * self.depth_scale
                             depth_mean, depth_std, height = self.isolate_height(_crop_rect)
                             display = cv2.drawContours(display, [box_adj], 0, (255, 255, 0), 2)
                             cv2.putText(display, f'{np.round(height, 3)}', (box_adj[0][0], box_adj[0][1]),
@@ -354,20 +352,14 @@ class Vision:
                     cv2.imshow('depth_feed', display)
                     if cv2.waitKey(1) & 0xFF == ord('q'):
                         break
-                fps = 1 / (new_process_time - prev_process_time)
-                prev_process_time = new_process_time
-                fps = int(fps)
-                # print(fps)  # TODO: this was active
+
+                toc = time.perf_counter()
+
+                fps = 1 / (toc - tic)
+                log.debug(f'FPS: {int(round(fps))}')
                 # search depth
                 # search color
                 # clean/combine features
                 # identification
         finally:
             self.pipeline.stop()
-
-
-class VisionClient:
-    """Client to the main Vision object that runs in the main program's event loop"""
-
-    def __init__(self):
-        raise NotImplementedError

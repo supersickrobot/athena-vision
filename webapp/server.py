@@ -1,6 +1,3 @@
-import json
-import aiohttp
-import asyncio
 import logging
 from aiohttp import web
 
@@ -8,9 +5,10 @@ log = logging.getLogger(__name__)
 
 
 class WebServer:
-    def __init__(self, config):
+    def __init__(self, config, vision_client):
         self.host = config.get('host', '0.0.0.0')  # default serve on all interfaces
         self.port = config['port']
+        self.vision_client = vision_client
 
     async def run(self):
         """Run web server that handles client connections"""
