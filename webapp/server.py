@@ -15,14 +15,15 @@ class WebServer:
 
         api_app = web.Application()
         api_app.add_routes([
-            web.get('/color-frame', self.handle_get_color_frame),
-            web.get('/analyzed-frame', self.handle_get_analyzed_frame),
+            web.get('/color-img', self.handle_get_color_img),
+            web.get('/depth-img', self.handle_get_depth_img),
+            web.get('/analyzed-img', self.handle_get_analyzed_img),
         ])
 
         app = web.Application()
         app.add_subapp('/api/v1/', api_app)
 
-        # TODO: HTTPS/WSS
+        # TODO: HTTPS
         # TODO: static site serving built webapp
 
         runner = web.AppRunner(app)
@@ -31,10 +32,17 @@ class WebServer:
         await site.start()
         log.info(f'Started web server on {self.host}:{self.port}')
 
-    async def handle_get_color_frame(self, request):
-        """Return the last captured color frame without analysis or annotations"""
-        return web.Response(text="Hello, world")
+    async def handle_get_color_img(self, request):
+        """Return the last captured color image without analysis or annotations"""
+        img = await self.vision_client.get_color_img()
+        return web.Response(body=img, content_type='image/jpeg')
 
-    async def handle_get_analyzed_frame(self, request):
-        """Return the last captured annotated depth + color frame as an annotated image with identified object data"""
-        raise NotImplementedError
+    async def handle_get_depth_img(self, request):
+        """Return the last captured depth as color image without analysis or annotations"""
+        img = await self.vision_client.get_depth_img()
+        return web.Response(body=img, content_type='image/jpeg')
+
+    async def handle_get_analyzed_img(self, request):
+        """Return the last captured annotated depth + color as an annotated image with identified object data"""
+        img = await self.vision_client.get_analyzed_img()
+        return web.Response(body=img, content_type='image/jpeg')

@@ -1,4 +1,6 @@
 """Remote procedure call (RPC)-like mechanism for using camera+image processing in another process"""
+import io
+import cv2
 import asyncio
 import logging
 import threading
@@ -29,7 +31,7 @@ class VisionServer:
                                     args=(self.req_q, self.res_q, self._vision_args, self._vision_kwargs))
         p.start()
 
-    def _run_vision_process(self, res_q, req_q, vision_args, vision_kwargs):
+    def _run_vision_process(self, req_q, res_q, vision_args, vision_kwargs):
         """Vision runner in separate process. This is all synchronous threaded code."""
         # Set logging in separate process
         #   TODO: make verbosity configurable
@@ -49,10 +51,21 @@ class VisionServer:
                 req = req_q.get()
                 name, value = req
                 log.debug(f'Got vision req: {req}')
-                if name == 'color_frame':
-                    pass
-                elif name == 'analyzed_frame':
-                    pass
+                if name == 'color_img':
+                    raw = vision.read_latest_raw()
+                    _, buf = cv2.imencode('.jpg', raw.color)  # TODO: options like other file formats
+                    res = io.BytesIO(buf)
+                elif name == 'depth_img':
+                    raw = vision.read_latest_raw()
+                    _, buf = cv2.imencode('.jpg', raw.depth_img)
+                    res = io.BytesIO(buf)
+                elif name == 'analyzed_img':
+                    analyzed = vision.read_latest_analyzed()
+                    _, buf = cv2.imencode('.jpg', analyzed.annotated_img)
+                    res = io.BytesIO(buf)
+                elif name == 'analyzed_objects':
+                    analyzed = vision.read_latest_analyzed()
+                    res = analyzed.objects  # TODO: json-serilizable
                 else:
                     log.error(f'Vision req: {req} not recognized. Ignoring.')
                 res_q.put(res)
@@ -71,12 +84,19 @@ class VisionClient:
         #   This is an asyncio lock that's only used in the program main loop
         self._lock = asyncio.Lock()
 
-    async def get_color_frame(self):
+    async def _get(self, name):
         async with self._lock:
-            self.req_q.put(('color_frame', None))
-            return await self.res_q.get()
+            self.req_q.put((name, None))
+            return await self.res_q.coro_get()
 
-    async def get_analyzed_frame(self):
-        async with self._lock:
-            self.req_q.put(('analyzed_frame', None))
-            return await self.res_q.get()
+    async def get_color_img(self):
+        return await self._get('color_img')
+
+    async def get_depth_img(self):
+        return await self._get('depth_img')
+
+    async def get_analyzed_img(self):
+        return await self._get('analyzed_img')
+
+    async def get_analyzed_objects(self):
+        return await self._get('analyzed_objects')

@@ -17,7 +17,7 @@ from rs_tools.pipe import find_background, centroid, crop_vert, isolate_backgrou
 log = logging.getLogger(__name__)
 
 RawData = collections.namedtuple('RawData', ['time', 'depth', 'depth_img', 'color'])
-AnalyzedData = collections.namedtuple('AnalyzedData', ['time', 'annotated_img', 'identified'])
+AnalyzedData = collections.namedtuple('AnalyzedData', ['time', 'annotated_img', 'objects'])
 
 
 class Vision:
@@ -391,7 +391,7 @@ class Vision:
 
                 toc = time.perf_counter()
                 fps = 1 / (toc - tic)
-                log.debug(f'FPS: {int(round(fps))}')
+                # log.debug(f'FPS: {int(round(fps))}')
 
                 # search depth
                 # search color
