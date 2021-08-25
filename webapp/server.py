@@ -19,6 +19,7 @@ class WebServer:
             web.get('/depth-img', self.handle_get_depth_img),
             web.get('/analyzed-img', self.handle_get_analyzed_img),
             web.get('/analyzed-objects', self.handle_get_analyzed_objects),
+            web.get('/ping', self.handle_ping)
         ])
 
         app = web.Application()
@@ -32,6 +33,11 @@ class WebServer:
         site = web.TCPSite(runner, self.host, self.port)
         await site.start()
         log.info(f'Started web server on {self.host}:{self.port}')
+
+    async def handle_ping(self, request):
+        print('ring-a-ding')
+        ping = await self.vision_client.ping()
+        return web.Response(body=ping, content_type='string')
 
     async def handle_get_color_img(self, request):
         """Return the last captured color image without analysis or annotations"""

@@ -86,6 +86,10 @@ class VisionClient:
         #   This is an asyncio lock that's only used in the program main loop
         self._lock = asyncio.Lock()
 
+    async def ping(self):
+        log.info('ping')
+        return ('ping')
+
     async def _get(self, name):
         async with self._lock:
             self.req_q.put((name, None))

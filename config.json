@@ -1,13 +1,13 @@
 {
   "verbosity": 3,
   "web": {
-    "host": "0.0.0.0",
+    "host": "192.168.1.10",
     "port": 5055
   },
   "comm": {
     "url": "http://192.168.1.9:8000"
   },
-  "live_display": true,
+  "live_display": false,
   "safety": {
     "device_id": "f0265103",
     "depth": {
@@ -51,7 +51,7 @@
       },
       "area": {
         "low": 900,
-        "high": 100000
+        "high": 10000
       },
       "background": {
         "bins": 100,

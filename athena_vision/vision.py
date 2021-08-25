@@ -17,7 +17,7 @@ from rs_tools.pipe import find_background, centroid, crop_vert, isolate_backgrou
 log = logging.getLogger(__name__)
 
 RawData = collections.namedtuple('RawData', ['time', 'depth', 'depth_img', 'color'])
-AnalyzedData = collections.namedtuple('AnalyzedData', ['time', 'annotated_img', 'objects'])
+AnalyzedData = collections.namedtuple('AnalyzedData', ['time', 'objects'])
 
 
 class Vision:
@@ -249,8 +249,8 @@ class Vision:
                 oi_config = self.config['object_identification']
                 frames = self.pipeline.wait_for_frames()
                 aligned_frames = self.align.process(frames)
-
                 depth_frame = aligned_frames.get_depth_frame()
+                depth_intrin = depth_frame.profile.as_video_stream_profile().intrinsics
                 color_frame = aligned_frames.get_color_frame()
 
                 depth_frame = self.temp_filter.process(depth_frame)
@@ -299,7 +299,38 @@ class Vision:
                 display = color
                 depth_objects = [[] for _ in contours]
                 color_objects = [[] for _ in contours_color]
-                obj_bins = 100
+
+                # find the robot, robot uses the entire depth frame, which is larger than color, positions won't match
+                robot_frame = frames.get_depth_frame()
+                robot = np.asanyarray(robot_frame.get_data())
+                robot_data = robot.copy()
+                # 2500 is roughly the height of the fully retracted spindle
+                robot_data[robot_data > 2000] = 0
+                robot_im = cv2.applyColorMap(cv2.convertScaleAbs(robot_data, alpha=0.03), cv2.COLORMAP_JET)
+                robot_im = cv2.cvtColor(robot_im, cv2.COLOR_BGR2GRAY)
+                retval_robot, threshold_robot = cv2.threshold(robot_im, 50, oi_config['contour']['high'],
+                                                  cv2.THRESH_BINARY_INV)
+                contours_robot, hierarchy_robot = cv2.findContours(threshold_robot, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+                roboty = cv2.applyColorMap(cv2.convertScaleAbs(robot_data, alpha=0.03), cv2.COLORMAP_JET)
+                for cnt_index, cnt in enumerate(contours_robot):
+                    area = cv2.contourArea(cnt)
+                    if area > 1000 and area < 10000:
+                        circ = cv2.minEnclosingCircle(cnt)
+                        x = np.int0(circ[0][0])
+                        y = np.int0(circ[0][1])
+                        rad = np.int0(circ[1])
+                        crop_circ = depth[x - rad:x + rad, y - rad:y + rad]
+                        _crop_circ = crop_circ[crop_circ != 0]
+                        depth_point = rs.rs2_deproject_pixel_to_point(depth_intrin, [x,y], self.depth_scale)
+                        depth_mean, depth_std, height = self.isolate_height(_crop_circ)
+                        if self.live_display:
+                            display = cv2.circle(display, [x, y], rad, (0, 255, 0), 2)
+                        obj = {'type': 'robot', 'shape': 'circle', 'height': height,
+                               'depth_mean': depth_mean, 'depth_std': depth_std,
+                               'x_center': circ[0][0], 'y_center': circ[0][1],
+                               'radius': circ[1], 'point': depth_point}
+                        depth_objects[cnt_index] = obj
+
                 for cnt_index, cnt in enumerate(contours):
                     area = cv2.contourArea(cnt)
                     if area > oi_config['area']['low'] and area < oi_config['area']['high']:
@@ -316,11 +347,16 @@ class Vision:
                             crop_circ = depth[x - rad:x + rad, y - rad:y + rad]
                             _crop_circ = crop_circ[crop_circ != 0]
                             depth_mean, depth_std, height = self.isolate_height(_crop_circ)
-                            display = cv2.circle(display, [x, y], rad, (255, 255, 0), 2)
-                            cv2.putText(display, f'{np.round(height, 3)}', (x, y), cv2.FONT_HERSHEY_DUPLEX, 0.5,
-                                        (36, 255, 12), 1)
-                            obj = {'type': 'depth', 'shape': 'circle', 'dimensions': circ, 'height': height,
-                                   'depth_mean': depth_mean, 'depth_std': depth_std}
+                            depth_point = rs.rs2_deproject_pixel_to_point(depth_intrin, [x, y], self.depth_scale)
+                            if self.live_display:
+                                display = cv2.circle(display, [x, y], rad, (255, 255, 0), 2)
+                                cv2.putText(display, f'{np.round(height, 3)}', (x, y), cv2.FONT_HERSHEY_DUPLEX, 0.5,
+                                            (36, 255, 12), 1)
+                            obj = {'type': 'depth', 'shape': 'circle', 'height': height,
+                                   'depth_mean': depth_mean, 'depth_std': depth_std,
+                                   'x_center':circ[0][0], 'y_center':circ[0][1],
+                                   'radius':circ[1], 'point': depth_point}
+
 
                         else:
                             box = cv2.boxPoints(rect)
@@ -332,11 +368,15 @@ class Vision:
                             crop_rect = crop_rectangle(depth, rect)
                             _crop_rect = crop_rect[crop_rect != 0]
                             depth_mean, depth_std, height = self.isolate_height(_crop_rect)
-                            display = cv2.drawContours(display, [box_adj], 0, (255, 255, 0), 2)
-                            cv2.putText(display, f'{np.round(height, 3)}', (box_adj[0][0], box_adj[0][1]),
-                                        cv2.FONT_HERSHEY_DUPLEX, 0.5, (36, 255, 12), 1)
-                            obj = {'type': 'depth', 'shape': 'rect', 'dimensions': box, 'height': height,
-                                   'depth_mean': depth_mean, 'depth_std': depth_std}
+                            if self.live_display:
+                                display = cv2.drawContours(display, [box_adj], 0, (255, 255, 0), 2)
+                                cv2.putText(display, f'{np.round(height, 3)}', (box_adj[0][0], box_adj[0][1]),
+                                            cv2.FONT_HERSHEY_DUPLEX, 0.5, (36, 255, 12), 1)
+                            obj = {'type': 'depth', 'shape': 'rect', 'height': height,
+                                   'depth_mean': depth_mean, 'depth_std': depth_std,
+                                   'x_center':rect[0][0], 'y_center':rect[0][1],
+                                   'width':rect[1][0], 'length':rect[1][1],
+                                   'angle':rect[2]}
                         depth_objects[cnt_index] = obj
 
                 for cnt_index, cnt in enumerate(contours_color):
@@ -354,11 +394,14 @@ class Vision:
                             crop_circ = depth[x - rad:x + rad, y - rad:y + rad]
                             _crop_circ = crop_circ[crop_circ != 0]
                             depth_mean, depth_mean, height = self.isolate_height(_crop_circ)
-                            display = cv2.circle(display, [x, y], rad, (255, 0, 255), 2)
-                            cv2.putText(display, f'{np.round(height, 3)}', (x, y), cv2.FONT_HERSHEY_DUPLEX, 0.5,
-                                        (36, 255, 12), 1)
-                            obj = {'type': 'color', 'shape': 'circle', 'dimensions': circ, 'height': height,
-                                   'depth_mean': depth_mean, 'depth_std': depth_std}
+                            if self.live_display:
+                                display = cv2.circle(display, [x, y], rad, (255, 0, 255), 2)
+                                cv2.putText(display, f'{np.round(height, 3)}', (x, y), cv2.FONT_HERSHEY_DUPLEX, 0.5,
+                                            (36, 255, 12), 1)
+                            obj = {'type': 'color', 'shape': 'circle', 'height': height,
+                                   'depth_mean': depth_mean, 'depth_std': depth_std,
+                                   'x_center':circ[0][0], 'y_center':circ[0][1],
+                                   'radius':circ[1]}
 
                         else:
                             box = cv2.boxPoints(rect)
@@ -366,11 +409,16 @@ class Vision:
                             crop_rect = crop_rectangle(depth, rect)
                             _crop_rect = crop_rect[crop_rect != 0]
                             depth_mean, depth_std, height = self.isolate_height(_crop_rect)
-                            display = cv2.drawContours(display, [box], 0, (255, 0, 255), 2)
-                            cv2.putText(display, f'{np.round(height, 3)}', (box[0][0], box[0][1]),
-                                        cv2.FONT_HERSHEY_DUPLEX, 0.5, (36, 255, 12), 1)
-                            obj = {'type': 'depth', 'shape': 'rect', 'dimensions': box, 'height': height,
-                                   'depth_mean': depth_mean, 'depth_std': depth_std}
+                            if self.live_display:
+                                display = cv2.drawContours(display, [box], 0, (255, 255, 255), 2)
+                                cv2.putText(display, f'{np.round(height, 3)}', (box[0][0], box[0][1]),
+                                            cv2.FONT_HERSHEY_DUPLEX, 0.5, (36, 255, 12), 1)
+                            obj = {'type': 'depth', 'shape': 'rect', 'height': height,
+                                   'depth_mean': depth_mean, 'depth_std': depth_std,
+                                   'x_center': rect[0][0], 'y_center': rect[0][1],
+                                   'width': rect[1][0], 'length': rect[1][1],
+                                   'angle': rect[2]}
+
                         color_objects[cnt_index] = obj
 
                 depth_objects = [i for i in depth_objects if i]
@@ -380,12 +428,12 @@ class Vision:
 
                 # Save analyzed data
                 #   Passing through these data structures is fine since they're all created in our analysis code
-                analyzed_data = AnalyzedData(now, display, all_objects)
+                analyzed_data = AnalyzedData(now, all_objects)
                 self._write_analyzed(analyzed_data)
 
                 # Show detected objects (with which sensor detected what and heights) overlaid on color image
                 if self.live_display:
-                    cv2.imshow('depth_feed', display)
+                    cv2.imshow('depth_feed', roboty)
                     if cv2.waitKey(1) & 0xFF == ord('q'):
                         break
 
@@ -393,9 +441,5 @@ class Vision:
                 fps = 1 / (toc - tic)
                 # log.debug(f'FPS: {int(round(fps))}')
 
-                # search depth
-                # search color
-                # clean/combine features
-                # identification
         finally:
             self.pipeline.stop()
