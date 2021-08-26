@@ -7,7 +7,7 @@
   "comm": {
     "url": "http://192.168.1.9:8000"
   },
-  "live_display": false,
+  "live_display": true,
   "safety": {
     "device_id": "f0265103",
     "depth": {
