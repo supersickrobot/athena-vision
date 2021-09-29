@@ -19,7 +19,8 @@ def crispy():
     _config = rs.config()
     _config.enable_device(device_id)
     _config.enable_stream(rs.stream.depth, 1024, 768, rs.format.z16, 30)
-    _config.enable_stream(rs.stream.color, 1920, 1080, rs.format.bgr8, 30)
+    _config.enable_stream(rs.stream.color, 1280, 720, rs.format.bgr8, 30)
+    _config.enable_record_to_file('test.bag')
     profile = pipeline.start(_config)
     depth_sensor = profile.get_device().first_depth_sensor()
     depth_sensor.set_option(rs.option.visual_preset, 5) #5 is short range

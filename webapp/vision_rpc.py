@@ -42,7 +42,6 @@ class VisionServer:
         # Instantiate and initialize Vision object
         log.info('Running vision process')
         vision = Vision(*vision_args, **vision_kwargs)
-        vision.establish_base()
 
         # Run the main Vision loop in another thread so the current one can handle RPCs
         t = threading.Thread(target=vision.run)

@@ -20,6 +20,7 @@
       "fps": 30
     }
   },
+
   "camera": {
     "device_id": "f0221610",
     "alpha": 0.5,
@@ -28,6 +29,9 @@
       "ratio": 2,
       "kernal": 3
     },
+      "table": {
+    "height": 4280
+  },
     "depth": {
       "resolution": [1024, 768],
       "scale": 0.001,
@@ -50,8 +54,8 @@
         "high": 255
       },
       "area": {
-        "low": 900,
-        "high": 10000
+        "low": 300,
+        "high": 30000
       },
       "background": {
         "bins": 100,

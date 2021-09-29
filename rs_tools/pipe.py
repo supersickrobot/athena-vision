@@ -72,7 +72,7 @@ def isolate_background(depth, height, tolerance_near, tolerance_far):
     far = height+tolerance_far
     near = height-tolerance_near
     depth_data[depth_data < near] = 0
-    depth_data[depth_data > far] = 0
+    # depth_data[depth_data > far] = 0
     return depth_data
 
 
