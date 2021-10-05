@@ -38,7 +38,7 @@
       "fps": 30
     },
     "color": {
-      "resolution": [1280, 720],
+      "resolution": [1920, 1080],
       "fps": 30
     },
     "preset": "None",
@@ -55,7 +55,7 @@
       },
       "area": {
         "low": 300,
-        "high": 30000
+        "high": 100000
       },
       "background": {
         "bins": 100,

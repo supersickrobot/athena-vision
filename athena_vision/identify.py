@@ -4,18 +4,14 @@ import cv2
 import math
 
 filenames = (glob.glob("testing_pipette/*.png"))
-for indx, file in enumerate(filenames):
-    img = cv2.imread(file)
-    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+def identify_pipette_tray(img):
     hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
     mask = cv2.inRange(hsv, np.array([30, 50, 50]), np.array([50, 255, 255]))
     res = cv2.bitwise_and(img, img, mask=mask)
-    res_color = res.copy()
     res = cv2.cvtColor(res, cv2.COLOR_BGR2GRAY)
 
     retval, thresh = cv2.threshold(res, 50, 255, cv2.THRESH_BINARY)
     cnts, hierarchy= cv2.findContours(thresh, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
-    new_img=thresh
     _rect = []
     _box = []
     for cnt in cnts:
@@ -23,13 +19,15 @@ for indx, file in enumerate(filenames):
         x = rect[0][0]
         y = rect[0][1]
         rect_area = rect[1][0]*rect[1][1]
-        if rect_area > 10000:
+        if rect_area > 1000:
             box = cv2.boxPoints(rect)
             box = np.int0(box)
-            # cv2.drawContours(img, [box], 0, (0,0,255))
+            cv2.drawContours(img, [box], 0, (0,0,255))
             # cv2.putText(img, f'{int(rect_area)}', (int(x), int(y)), cv2.FONT_HERSHEY_PLAIN, 1, (255,255,255), 1)
             _rect = rect
             _box = box
+    if not _rect:
+        return img
     ret, thresh2 = cv2.threshold(res, 10, 255, cv2.THRESH_BINARY_INV)
     cnts2, hierarchy = cv2.findContours(thresh2, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
     _rect2=[]
@@ -37,7 +35,7 @@ for indx, file in enumerate(filenames):
         rect = cv2.minAreaRect(cnt)
         box = cv2.boxPoints(rect)
         box = np.int0(box)
-        check_point = cv2.pointPolygonTest(_box, rect[0], False)
+        check_point = cv2.pointPolygonTest(box, rect[0], False)
         if rect[1][0] > 7 and rect[1][1] > 7 and check_point>-1:
             # cv2.drawContours(img, [box], 0, (255, 255, 255))
             # cv2.putText(img, f'{int(rect[1][0]), int(rect[1][1])}', box[0], cv2.FONT_HERSHEY_PLAIN,1, (255,255,255), 1)
@@ -121,6 +119,9 @@ for indx, file in enumerate(filenames):
         if len(group) >1:
             columns.append(group)
 
+    if not columns:
+        return img
+
     xvalues = []
     yvalues = []
     for sets in columns:
@@ -144,24 +145,14 @@ for indx, file in enumerate(filenames):
     target_array = []
     angle = np.angle(_rect[2])
 
-    if angle > 1.3:
-        angle = angle - np.pi / 2
-    dewarp_spacing = 10
+    # if angle > 1.3:
+    #     angle = angle - np.pi / 2
+    dewarp_spacing = 13
     angle = np.radians(angle)
     for ii in range(0, num_rows):
         for jj in range(0, num_col):
             xn = xc + dewarp_spacing*(ii-num_rows/2+.5) * math.cos(angle) - dewarp_spacing * (jj - num_col/2+.5)*math.sin(angle)
             yn = yc + dewarp_spacing*(ii-num_rows/2+.5)*math.sin(angle) + dewarp_spacing*(jj-num_col/2+.5)*math.cos(angle)
             target_array.append((xn,yn))
-
-    for ii in target_array:
-        cv2.circle(img, (int(ii[0]), int(ii[1])), 0, (255,255,0),5)
-
-
-
-
-
-
-    cv2.imshow(str(indx), img)
-
-cv2.waitKey(0)
+    response = [angle, xc, yc, target_array]
+    return response

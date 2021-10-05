@@ -8,7 +8,7 @@ import collections
 import numpy as np
 import pyrealsense2 as rs
 from datetime import datetime, timezone
-
+from athena_vision.identify import identify_pipette_tray
 from rs_tools.image_manipulation import crop_rectangle
 from rs_tools.pipe import find_background, centroid, crop_vert, isolate_background
 
@@ -119,7 +119,7 @@ class Vision:
 
                 depth = np.asanyarray(depth_frame.get_data())
                 depthy = cv2.applyColorMap(cv2.convertScaleAbs(depth, alpha=0.03), cv2.COLORMAP_JET)
-                funk = isolate_background(depth, self.workspace_height, 40, 110)
+                funk = isolate_background(depth, self.workspace_height, 20, 200)
                 funky = cv2.applyColorMap(cv2.convertScaleAbs(funk, alpha=0.03), cv2.COLORMAP_JET)
                 junky = depthy - funky
 
@@ -133,9 +133,63 @@ class Vision:
 
                 color_frame = aligned_frames.get_color_frame()
                 color = np.asanyarray(color_frame.get_data())
-                display = color
+                display = color.copy()
+
+
                 depth_objects, display = self.check_contours(contours, depth, depth_intrin, display, (255, 0, 255))
+                depth_objects = [i for i in depth_objects if i]
                 display = cv2.addWeighted(junky, 0.4, display, 0.6, 0)
+                # 128 192
+
+                for obj in depth_objects:
+                    xc = obj['x_center']
+                    yc = obj['y_center']
+                    wc = obj['width']
+                    lc = obj['length']
+                    angle = obj['angle']
+                    rect = ((xc, yc), (wc, lc), angle)
+
+                    w = rect[1][0]
+                    l = rect[1][1]
+                    tol = 20
+                    margin = 30
+                    # if 128 <= w <= 128 + tol and 190 <= l <= 190 + tol or \
+                    #         128 <= l <= 128 + tol and 190 <= w <= 190 + tol:
+                    if 167-tol <= w <= 167+tol and 112-tol <= l <= 112+tol or\
+                        167 - tol <= l <= 167 + tol and 112 - tol <= w <= 112 + tol:
+                        new_rect = ((rect[0][0], rect[0][1]), (w+margin, l+margin), rect[2])
+                        box = cv2.boxPoints(new_rect)
+                        box = np.int0(box)
+                        wn = int(w+margin)
+                        ln = int(l+margin)
+                        src_pts = box.astype("float32")
+                        dst_pts = np.array([[0, ln],
+                                            [0, 0],
+                                            [wn, 0],
+                                            [wn, ln]], dtype='float32')
+                        M = cv2.getPerspectiveTransform(src_pts, dst_pts)
+                        warped = cv2.warpPerspective(color, M, (wn, ln))
+                        cv2.imshow('warped', warped)
+                        #
+                        # response = identify_pipette_tray(warped)
+                        # if len(response) == 4:
+                        #     angle_r, xr, yr, target_array = response
+                        # else:
+                        #     continue
+                        # _, IM = cv2.invert(M)
+                        # _target_array = []
+                        # for ii in target_array:
+                        #     xn = ii[0]
+                        #     yn = ii[1]
+                        #     xn, yn, z = np.dot(IM, [xn, yn] + [1])
+                        #     xn = xn/z
+                        #     yn = yn/z
+                        #     _target_array.append((xn,yn))
+                        # for ii in _target_array:
+                        #     cv2.circle(display, (int(ii[0]), int(ii[1])), 0, (255, 255, 0), 5)
+
+
+
                 if self.live_display:
                     cv2.imshow('depth_feed', display)
                     if cv2.waitKey(1) & 0xFF == ord('q'):
@@ -168,7 +222,7 @@ class Vision:
                 height = -1 * (depth_point[2] - self.workspace_height* self.depth_scale)
                 if self.live_display:
                     display = cv2.drawContours(display, [box], 0, color, 2)
-                    cv2.putText(display, f'{np.round(height, 3)}', (box[0][0], box[0][1]),
+                    cv2.putText(display, f'{int(rect[1][0]), int(rect[1][1])}', (box[0][0], box[0][1]),
                                 cv2.FONT_HERSHEY_DUPLEX, 0.5, (36, 255, 12), 1)
                 obj = {'height': height,
                        'depth_mean': depth_mean,
