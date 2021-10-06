@@ -135,13 +135,12 @@ class Vision:
                 color = np.asanyarray(color_frame.get_data())
                 display = color.copy()
 
-
                 depth_objects, display = self.check_contours(contours, depth, depth_intrin, display, (255, 0, 255))
                 depth_objects = [i for i in depth_objects if i]
                 display = cv2.addWeighted(junky, 0.4, display, 0.6, 0)
                 # 128 192
 
-                for obj in depth_objects:
+                for indx, obj in enumerate(depth_objects):
                     xc = obj['x_center']
                     yc = obj['y_center']
                     wc = obj['width']
@@ -151,44 +150,30 @@ class Vision:
 
                     w = rect[1][0]
                     l = rect[1][1]
-                    tol = 20
-                    margin = 30
-                    # if 128 <= w <= 128 + tol and 190 <= l <= 190 + tol or \
-                    #         128 <= l <= 128 + tol and 190 <= w <= 190 + tol:
-                    if 167-tol <= w <= 167+tol and 112-tol <= l <= 112+tol or\
-                        167 - tol <= l <= 167 + tol and 112 - tol <= w <= 112 + tol:
-                        new_rect = ((rect[0][0], rect[0][1]), (w+margin, l+margin), rect[2])
-                        box = cv2.boxPoints(new_rect)
-                        box = np.int0(box)
-                        wn = int(w+margin)
-                        ln = int(l+margin)
-                        src_pts = box.astype("float32")
-                        dst_pts = np.array([[0, ln],
-                                            [0, 0],
-                                            [wn, 0],
-                                            [wn, ln]], dtype='float32')
-                        M = cv2.getPerspectiveTransform(src_pts, dst_pts)
-                        warped = cv2.warpPerspective(color, M, (wn, ln))
-                        cv2.imshow('warped', warped)
-                        #
-                        # response = identify_pipette_tray(warped)
-                        # if len(response) == 4:
-                        #     angle_r, xr, yr, target_array = response
-                        # else:
-                        #     continue
-                        # _, IM = cv2.invert(M)
-                        # _target_array = []
-                        # for ii in target_array:
-                        #     xn = ii[0]
-                        #     yn = ii[1]
-                        #     xn, yn, z = np.dot(IM, [xn, yn] + [1])
-                        #     xn = xn/z
-                        #     yn = yn/z
-                        #     _target_array.append((xn,yn))
-                        # for ii in _target_array:
-                        #     cv2.circle(display, (int(ii[0]), int(ii[1])), 0, (255, 255, 0), 5)
+                    tol = 30
+                    margin = 40
+                    if 128 <= w <= 128 + tol and 190 <= l <= 190 + tol or \
+                            128 <= l <= 128 + tol and 190 <= w <= 190 + tol:
+                        crop, img_loc = self.create_crop(color, rect, margin)
+                        cv2.imshow('pipette tray', crop)
 
-
+                        response = identify_pipette_tray(crop)
+                        if len(response) == 4:
+                            angle_r, xr, yr, target_array = response
+                        else:
+                            continue
+                        _target_array=[]
+                        for i in target_array:
+                            xa = i[0]
+                            ya = i[1]
+                            xn = img_loc[0][0] + xa #- img_loc[0][0]
+                            yn = img_loc[1][0] + ya #- img_loc[0][1]
+                            _target_array.append((xn, yn))
+                        # cv2.putText(display, f'{int(img_loc[0][0], int(img_loc[0][1]))}', (int(xc), int(yc)), cv2.FONT_HERSHEY_PLAIN, 1, (255,255,255), 1)
+                        for ii in _target_array:
+                            cv2.circle(display, (int(ii[0]), int(ii[1])), 0, (255, 255, 0), 5)
+                        depth_objects[indx]['identity'] = 'pipette tray'
+                        depth_objects[indx]['target'] = [angle_r, xr, yr]
 
                 if self.live_display:
                     cv2.imshow('depth_feed', display)
@@ -231,10 +216,63 @@ class Vision:
                        'angle': rect[2], 'point': depth_point}
 
                 objects[cnt_index] = obj
-
         return objects, display
+
     def scale_point(self, depth_point):
         depth_point[0] = depth_point[0]*self.depth_scale
         depth_point[1] = depth_point[1]*self.depth_scale
         depth_point[2] = depth_point[2]*self.depth_scale
         return depth_point
+
+    def create_warp(self, img, rect, margin):
+        w = rect[1][0]
+        l = rect[1][1]
+
+        new_rect = ((rect[0][0], rect[0][1]), (w + margin, l + margin), rect[2])
+        box = cv2.boxPoints(new_rect)
+        box = np.int0(box)
+        wn = int(w + margin)
+        ln = int(l + margin)
+        src_pts = box.astype("float32")
+        dst_pts = np.array([[0, ln],
+                            [0, 0],
+                            [wn, 0],
+                            [wn, ln]], dtype='float32')
+        M = cv2.getPerspectiveTransform(src_pts, dst_pts)
+        warped = cv2.warpPerspective(img, M, (wn, ln))
+        return warped, M
+
+    def create_crop(self, img, rect, margin):
+        box = cv2.boxPoints(rect)
+        xvalues =[]
+        yvalues = []
+        for i in box:
+            xvalues.append(i[0])
+            yvalues.append(i[1])
+
+        xlow = int(min(xvalues)-margin/2)
+        xhigh = int(max(xvalues)+margin/2)
+        ylow = int(min(yvalues)-margin/2)
+        yhigh = int(max(yvalues)+margin/2)
+        if xlow < 0:
+            xlow = 0
+        if xhigh > 1920:
+            xhigh = 1920
+        if yhigh > 1080:
+            yhigh = 1080
+        if ylow < 0:
+            ylow = 0
+        crop = img[ylow:yhigh, xlow:xhigh]
+
+        return crop, [[xlow, xhigh], [ylow, yhigh]]
+
+    def project_warp_points(self, target_array, IM):
+        _target_array = []
+        for ii in target_array:
+            xn = ii[0]
+            yn = ii[1]
+            xn, yn, z = np.dot(IM, [xn, yn] + [1])
+            xn = xn/z
+            yn = yn/z
+            _target_array.append((xn,yn))
+        return _target_array
