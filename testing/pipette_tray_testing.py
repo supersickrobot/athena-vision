@@ -39,7 +39,7 @@ for indx, file in enumerate(filenames):
         box = np.int0(box)
         check_point = cv2.pointPolygonTest(_box, rect[0], False)
         if rect[1][0] > 7 and rect[1][1] > 7 and check_point>-1:
-            # cv2.drawContours(img, [box], 0, (255, 255, 255))
+            cv2.drawContours(img, [box], 0, (255, 255, 255))
             # cv2.putText(img, f'{int(rect[1][0]), int(rect[1][1])}', box[0], cv2.FONT_HERSHEY_PLAIN,1, (255,255,255), 1)
             _rect2.append(rect)
 
@@ -153,13 +153,6 @@ for indx, file in enumerate(filenames):
             xn = xc + dewarp_spacing*(ii-num_rows/2+.5) * math.cos(angle) - dewarp_spacing * (jj - num_col/2+.5)*math.sin(angle)
             yn = yc + dewarp_spacing*(ii-num_rows/2+.5)*math.sin(angle) + dewarp_spacing*(jj-num_col/2+.5)*math.cos(angle)
             target_array.append((xn,yn))
-
-    for ii in target_array:
-        cv2.circle(img, (int(ii[0]), int(ii[1])), 0, (255,255,0),5)
-
-
-
-
 
 
     cv2.imshow(str(indx), img)

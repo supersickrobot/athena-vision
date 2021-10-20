@@ -331,7 +331,7 @@ class Vision:
                 robot_objects = [i for i in robot_objects if i]
                 depth_objects = [i for i in depth_objects if i]
                 color_objects = [i for i in color_objects if i]
-                all_objects =  robot_objects + depth_objects + color_objects
+                all_objects = robot_objects + depth_objects + color_objects
                 self.objects = all_objects
 
                 # Save analyzed data

@@ -113,7 +113,8 @@ def crispy():
                     table_height = tbl_far
 
 
-                plt.ylim((table_height*depth_scale+100*depth_scale, table_height*depth_scale-200*depth_scale))
+                # plt.ylim((table_height*depth_scale+100*depth_scale, table_height*depth_scale-600*depth_scale))
+                plt.ylim((table_height*depth_scale+100*depth_scale, 3500))
 
             crop, l_bound, u_bound = crop_vert(junky, workspace_center, workspace_depth)
 
