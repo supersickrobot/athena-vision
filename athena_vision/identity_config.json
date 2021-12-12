@@ -1,0 +1,55 @@
+{
+  "pipette tip tray 1mL": {
+    "search_color_low": [20, 100, 100],
+    "search_color_high" : [60, 255, 255],
+    "num of slots width": 8,
+    "num of slots length": 12,
+    "width offset": 12,
+    "length offset": 14.5,
+    "width spacing": 9,
+    "length spacing": 9,
+    "width in mm": 85.25,
+    "length in mm": 127.30,
+    "height in mm": 100,
+    "circle size in pixels": 4,
+    "color threshold": 20000
+  },
+   "pipette tip tray 50uL": {
+    "search_color_low": [70, 50, 10],
+    "search_color_high" : [120, 255, 255],
+    "num of slots width": 8,
+    "num of slots length": 12,
+    "width offset": 12,
+    "length offset": 14.5,
+    "width spacing": 9,
+    "length spacing": 9,
+    "width in mm": 85.25,
+    "length in mm": 127.30,
+    "height in mm": 59,
+    "circle size in pixels": 4,
+    "color threshold": 20000
+  },
+    "test tube tray": {
+      "search_color_low": [85, 125, 100],
+      "search_color_high" : [95, 255, 255],
+      "num of slots width": 5,
+      "num of slots length": 10,
+      "width offset": 12,
+      "length offset": 15,
+      "width spacing": 22,
+      "length spacing": 23,
+      "width in mm": 112.5,
+      "length in mm": 238,
+      "height in mm": 61,
+      "circle size in pixels": 11,
+      "color threshold": 25000
+  },
+  "waste bin": {
+    "search_color_low": [85, 125, 100],
+      "search_color_high" : [95, 255, 255],
+      "width in mm": 66,
+      "length in mm": 66,
+      "height in mm": 83,
+      "color threshold": 5000
+  }
+}

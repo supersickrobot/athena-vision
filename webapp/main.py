@@ -16,10 +16,14 @@ async def main():
     """Main entry point to camera node webserver"""
     # Load config file, with default in root of this repo
     config_file = os.getenv('CAMERA_CONFIG', os.path.join(this_dir, '../config.json'))
+    id_config_file = os.getenv('IDENTITIES_CONFIG', os.path.join(this_dir, '../athena_vision/identity_config.json'))
     with open(config_file, 'r') as f:
         config = json.load(f)
+
     # TODO: jsonschema validation
 
+    with open(id_config_file, 'r') as f:
+        id_config = json.load(f)
     # Set logging verbosity, with default at info level
     verbosity = config.get('verbosity', 2)
     logging.basicConfig(level=get_verbosity(verbosity), format='%(levelname)s : %(asctime)s : %(name)s : %(message)s')
@@ -28,7 +32,7 @@ async def main():
     # Initialize camera/lidar RPC system
     log.info('Initializing camera')
     live_display = config.get('live_display', False)
-    vision_server = VisionServer(config['camera'], live_display)
+    vision_server = VisionServer(config['camera'], id_config, live_display)
     vision_client = VisionClient(vision_server.req_q, vision_server.res_q)
 
     # Initialize webserver, feeding in the object that gives access to the vision system outputs

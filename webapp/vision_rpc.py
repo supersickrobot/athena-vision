@@ -62,7 +62,7 @@ class VisionServer:
                     res = io.BytesIO(buf)
                 elif name == 'analyzed_img':
                     analyzed = vision.read_latest_analyzed()
-                    _, buf = cv2.imencode('.jpg', analyzed.annotated_img)
+                    _, buf = cv2.imencode('.jpg', analyzed.analyzed_img)
                     res = io.BytesIO(buf)
                 elif name == 'analyzed_objects':
                     analyzed = vision.read_latest_analyzed()
